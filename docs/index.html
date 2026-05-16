@@ -357,7 +357,7 @@ function updateChart(key) {
 
 // ========== 履歴管理 ==========
 function addToHistory(key, data) {
-  if (!data.currentLevel || !data.updateTime) return;
+  if (data.currentLevel == null || !data.updateTime) return;
   if (historyData[key].some(e => e.time === data.updateTime)) return;
 
   historyData[key].push({ time: data.updateTime, level: data.currentLevel });
