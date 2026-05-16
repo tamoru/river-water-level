@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>河川水位情報</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #fff;
+      color: #333;
+      padding: 20px;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+    header { text-align: center; margin-bottom: 30px; }
+    header h1 { font-size: 1.8rem; }
+    .badge { background: #3b82f6; color: #fff; padding: 4px 10px; border-radius: 4px; font-size: 0.7rem; margin-left: 10px; }
+    .alert { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 12px; margin-bottom: 20px; font-size: 0.85rem; }
+    .alert strong { color: #d97706; }
+
+    .btn { background: #3b82f6; color: #fff; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 8px; margin: 0 auto 20px; }
+    .btn:hover { background: #2563eb; }
+    .btn:disabled { background: #999; cursor: not-allowed; }
+    .spinner { width: 16px; height: 16px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error { background: #fee; border: 1px solid #e44; border-radius: 8px; padding: 20px; text-align: center; margin-bottom: 20px; display: none; }
+    .error h3 { color: #e44; margin-bottom: 10px; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; margin-bottom: 20px; }
+    .card { background: #f8f9fa; border-radius: 16px; padding: 25px; border: 1px solid #e0e0e0; }
+    .card-header { display: flex; justify-content: space-between; margin-bottom: 15px; }
+    .card-title { font-size: 1.3rem; font-weight: 600; }
+    .card-subtitle { color: #666; font-size: 0.85rem; margin-top: 3px; }
+
+    .status { padding: 6px 14px; border-radius: 16px; font-weight: 600; font-size: 0.8rem; }
+    .status.normal { background: #10b981; color: #fff; }
+    .status.standby { background: #3b82f6; color: #fff; }
+    .status.caution { background: #f59e0b; color: #000; }
+    .status.warning { background: #ef4444; color: #fff; }
+    .status.danger { background: #7c3aed; color: #fff; }
+    .status.loading { background: #999; color: #fff; }
+
+    .value { text-align: center; margin: 20px 0; }
+    .value-num { font-size: 3rem; font-weight: 700; }
+    .value-unit { font-size: 1.2rem; color: #666; }
+    .trend { color: #666; font-size: 0.9rem; margin-top: 5px; }
+    .trend.up { color: #e44; }
+    .trend.down { color: #38f; }
+    .trend.stable { color: #1a5; }
+
+    .level-bar { margin: 15px 0; }
+    .level-labels, .level-values { display: flex; justify-content: space-between; font-size: 0.7rem; color: #666; }
+    .level-track { height: 8px; background: linear-gradient(to right, #10b981 25%, #3b82f6 50%, #f59e0b 75%, #ef4444 100%); border-radius: 4px; position: relative; margin: 5px 0 8px; }
+    .level-marker { position: absolute; top: -6px; width: 20px; height: 20px; background: #fff; border-radius: 50%; transform: translateX(-50%); box-shadow: 0 2px 8px rgba(0,0,0,0.3); display: none; }
+
+    .time { color: #555; font-size: 0.8rem; text-align: center; margin-top: 15px; }
+    .fetch-time { color: #888; font-size: 0.75rem; text-align: center; margin-top: 5px; }
+
+    .chart-card { background: #f8f9fa; border-radius: 16px; padding: 25px; border: 1px solid #e0e0e0; }
+    .chart-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 15px; }
+    .chart-wrap { height: 200px; position: relative; }
+    .no-data { text-align: center; color: #888; padding: 50px; font-size: 0.9rem; }
+
+    footer { text-align: center; color: #666; font-size: 0.8rem; margin-top: 30px; }
+    footer a { color: #2563eb; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>河川水位情報<span class="badge">GitHub Pages版</span></h1>
+    </header>
+
+    <div class="alert">
+      <strong>注意:</strong> CORSプロキシ経由でYahoo!天気・災害からデータを取得しています。プロキシの制限により取得に失敗する場合があります。
+    </div>
+
+    <button class="btn" id="btn" onclick="fetchAllData()">
+      <span id="btnText">データを取得</span>
+    </button>
+
+    <div class="error" id="error">
+      <h3>エラー</h3>
+      <p id="errorText"></p>
+    </div>
+
+    <!-- 観測所カード -->
+    <div class="grid" id="cards"></div>
+
+    <!-- グラフ -->
+    <div class="grid" id="charts"></div>
+
+    <footer>
+      <p>データ出典: <a href="https://typhoon.yahoo.co.jp/weather/river/" target="_blank">Yahoo!天気・災害</a></p>
+      <p>GitHub Pages静的ホスティング版</p>
+    </footer>
+  </div>
+
+<script>
+// ========== 設定 ==========
+const STATIONS = {
+  otsuki: {
+    name: '大月',
+    riverName: '桂川（相模川水系）',
+    observatoryCode: '0358500400001',
+    url: 'https://typhoon.yahoo.co.jp/weather/river/8303070001/',
+    levels: null,
+    color: '#3b82f6'
+  },
+  chofubashi: {
+    name: '調布橋',
+    riverName: '多摩川',
+    observatoryCode: '2132000400004',
+    url: 'https://typhoon.yahoo.co.jp/weather/river/8303050001/',
+    levels: { standby: 0.2, caution: 1.0, evacuation: 1.2, danger: 1.6 },
+    color: '#10b981'
+  },
+  yuhara: {
+    name: '湯原',
+    riverName: '利根川',
+    observatoryCode: '2128900400012',
+    url: 'https://typhoon.yahoo.co.jp/weather/river/8303030001/',
+    levels: null,
+    color: '#f59e0b'
+  },
+  tsukiyonobashi: {
+    name: '月夜野橋',
+    riverName: '利根川',
+    observatoryCode: '0256100400044',
+    url: 'https://typhoon.yahoo.co.jp/weather/river/8303030001/',
+    levels: { standby: 4.3, caution: 5.0, evacuation: 5.1, danger: 5.2 },
+    color: '#ef4444'
+  },
+  taishibashi: {
+    name: '大正橋',
+    riverName: '利根川',
+    observatoryCode: '0256100400018',
+    url: 'https://typhoon.yahoo.co.jp/weather/river/8303030001/',
+    levels: { standby: 3.7, caution: 4.6, evacuation: 5.7, danger: 6.69 },
+    color: '#8b5cf6'
+  }
+};
+
+const CORS_PROXIES = [
+  'https://api.allorigins.win/raw?url=',
+  'https://corsproxy.io/?'
+];
+
+let currentProxy = 0;
+const charts = {};
+const historyData = {};
+
+// ========== ユーティリティ ==========
+function $(id) { return document.getElementById(id); }
+
+function formatTime(isoStr) {
+  return new Date(isoStr).toLocaleString('ja-JP', {
+    timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+  });
+}
+
+function formatLevel(val) {
+  return val != null ? val.toFixed(1) + 'm' : '--';
+}
+
+// ========== 初期化 ==========
+function initUI() {
+  const cardsContainer = $('cards');
+  const chartsContainer = $('charts');
+
+  for (const [key, station] of Object.entries(STATIONS)) {
+    historyData[key] = JSON.parse(localStorage.getItem(`history_${key}`) || '[]');
+
+    // カード生成
+    cardsContainer.innerHTML += `
+      <div class="card" id="card-${key}">
+        <div class="card-header">
+          <div>
+            <div class="card-title">${station.name}</div>
+            <div class="card-subtitle">${station.riverName}</div>
+          </div>
+          <div class="status loading" id="status-${key}">読込中</div>
+        </div>
+        <div class="value">
+          <span class="value-num" id="level-${key}">--</span>
+          <span class="value-unit">m</span>
+          <div class="trend" id="trend-${key}"></div>
+        </div>
+        <div class="level-bar" id="levelbar-${key}">
+          <div class="level-labels"><span>通常</span><span>待機</span><span>注意</span><span>危険</span></div>
+          <div class="level-track"><div class="level-marker" id="marker-${key}"></div></div>
+          <div class="level-values" id="levels-${key}"><span>--</span><span>--</span><span>--</span><span>--</span></div>
+        </div>
+        <div class="time" id="time-${key}">データを取得してください</div>
+        <div class="fetch-time" id="fetch-${key}"></div>
+      </div>
+    `;
+
+    // グラフ生成
+    chartsContainer.innerHTML += `
+      <div class="chart-card">
+        <div class="chart-title">${station.name}（${station.riverName}）</div>
+        <div class="chart-wrap"><canvas id="chart-${key}"></canvas></div>
+        <div class="no-data" id="nodata-${key}">データを取得するとグラフが表示されます</div>
+      </div>
+    `;
+  }
+}
+
+// ========== ステータス判定 ==========
+function getStatus(level, levels) {
+  if (!levels || !levels.danger) return { text: '基準なし', cls: 'normal' };
+  if (level >= levels.danger) return { text: '氾濫危険', cls: 'danger' };
+  if (level >= levels.evacuation) return { text: '避難判断', cls: 'warning' };
+  if (level >= levels.caution) return { text: '氾濫注意', cls: 'caution' };
+  if (level >= levels.standby) return { text: '水防団待機', cls: 'standby' };
+  return { text: '通常', cls: 'normal' };
+}
+
+function getTrendText(trend) {
+  const texts = { 1: '下降中', 2: '変化なし', 3: '上昇中' };
+  return texts[trend] || '';
+}
+
+function getTrendClass(trend) {
+  if (trend === 3) return 'up';
+  if (trend === 1) return 'down';
+  return 'stable';
+}
+
+// ========== カード更新 ==========
+function updateCard(key, data, fetchedAt) {
+  const station = STATIONS[key];
+  const levels = station.levels || {};
+  const hasLevels = levels.danger || levels.caution;
+
+  $(`level-${key}`).textContent = data.currentLevel != null ? data.currentLevel.toFixed(2) : '--';
+
+  const status = getStatus(data.currentLevel, levels);
+  const statusEl = $(`status-${key}`);
+  statusEl.textContent = status.text;
+  statusEl.className = 'status ' + status.cls;
+
+  const trendEl = $(`trend-${key}`);
+  trendEl.textContent = getTrendText(data.trend);
+  trendEl.className = 'trend ' + getTrendClass(data.trend);
+
+  const levelBar = $(`levelbar-${key}`);
+  if (hasLevels) {
+    levelBar.style.display = 'block';
+    $(`levels-${key}`).innerHTML = `<span>${formatLevel(levels.standby)}</span><span>${formatLevel(levels.caution)}</span><span>${formatLevel(levels.evacuation)}</span><span>${formatLevel(levels.danger)}</span>`;
+
+    const marker = $(`marker-${key}`);
+    if (data.currentLevel != null) {
+      const pos = Math.min(100, Math.max(0, (data.currentLevel / (levels.danger * 1.2)) * 100));
+      marker.style.display = 'block';
+      marker.style.left = pos + '%';
+    }
+  } else {
+    levelBar.style.display = 'none';
+  }
+
+  $(`time-${key}`).textContent = data.updateTime ? '観測: ' + formatTime(data.updateTime) : '観測時刻: 不明';
+  $(`fetch-${key}`).textContent = fetchedAt ? '取得: ' + formatTime(fetchedAt) : '';
+}
+
+// ========== グラフ ==========
+function updateChart(key) {
+  const station = STATIONS[key];
+  const data = historyData[key];
+  const canvas = $(`chart-${key}`);
+  const noData = $(`nodata-${key}`);
+
+  if (!data || data.length === 0) {
+    noData.style.display = 'block';
+    canvas.style.display = 'none';
+    return;
+  }
+
+  noData.style.display = 'none';
+  canvas.style.display = 'block';
+
+  const dataset = {
+    data: data.map(d => ({ x: new Date(d.time), y: d.level })),
+    borderColor: station.color,
+    borderWidth: 2,
+    fill: false,
+    tension: 0,
+    pointRadius: 3,
+    pointBackgroundColor: station.color
+  };
+
+  if (charts[key]) {
+    charts[key].data.datasets = [dataset];
+    charts[key].update();
+    return;
+  }
+
+  charts[key] = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: { datasets: [dataset] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: items => formatTime(new Date(items[0].parsed.x).toISOString()),
+            label: ctx => ctx.parsed.y.toFixed(2) + 'm'
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'time',
+          time: { unit: 'minute', stepSize: 10, displayFormats: { minute: 'HH:mm' } },
+          grid: { color: 'rgba(0,0,0,0.1)' },
+          ticks: { color: '#666', maxTicksLimit: 8 }
+        },
+        y: {
+          grid: { color: 'rgba(0,0,0,0.1)' },
+          ticks: { color: '#666', stepSize: 0.01, callback: v => v.toFixed(2) + 'm' }
+        }
+      }
+    }
+  });
+}
+
+// ========== 履歴管理 ==========
+function addToHistory(key, data) {
+  if (!data.currentLevel || !data.updateTime) return;
+  if (historyData[key].some(e => e.time === data.updateTime)) return;
+
+  historyData[key].push({ time: data.updateTime, level: data.currentLevel });
+  historyData[key].sort((a, b) => new Date(a.time) - new Date(b.time));
+
+  while (historyData[key].length > 144) {
+    historyData[key].shift();
+  }
+
+  localStorage.setItem(`history_${key}`, JSON.stringify(historyData[key]));
+}
+
+// ========== データ抽出 ==========
+function extractWaterData(html, obsCode) {
+  const result = { currentLevel: null, updateTime: null, trend: null };
+
+  const pattern = new RegExp(
+    `"observatoryCode":"${obsCode}"[^}]*"observatoryTime":"([^"]+)"[^}]*"trend":(\\d+)[^}]*"waterValue":"([^"]+)"`,
+    'i'
+  );
+  const match = html.match(pattern);
+
+  if (match) {
+    result.updateTime = match[1].replace('Z', '+09:00');
+    result.trend = parseInt(match[2]);
+    result.currentLevel = parseFloat(match[3]);
+  }
+
+  return result;
+}
+
+// ========== データ取得 ==========
+async function fetchWithProxy(url) {
+  for (let i = 0; i < CORS_PROXIES.length; i++) {
+    const proxyIndex = (currentProxy + i) % CORS_PROXIES.length;
+    const proxyUrl = CORS_PROXIES[proxyIndex] + encodeURIComponent(url);
+
+    try {
+      const res = await fetch(proxyUrl);
+      if (res.ok) {
+        currentProxy = proxyIndex;
+        return await res.text();
+      }
+    } catch (e) {
+      console.log(`Proxy ${proxyIndex} failed:`, e.message);
+    }
+  }
+  throw new Error('全てのプロキシで取得に失敗しました');
+}
+
+async function fetchStation(key) {
+  const station = STATIONS[key];
+
+  try {
+    const html = await fetchWithProxy(station.url);
+    const data = extractWaterData(html, station.observatoryCode);
+    const fetchedAt = new Date().toISOString();
+
+    updateCard(key, data, fetchedAt);
+    addToHistory(key, data);
+    updateChart(key);
+
+    return { success: true, key, data };
+  } catch (e) {
+    console.error(`${station.name} 取得エラー:`, e.message);
+    return { success: false, key, error: e.message };
+  }
+}
+
+async function fetchAllData() {
+  const btn = $('btn');
+  const btnText = $('btnText');
+  const error = $('error');
+
+  btn.disabled = true;
+  btnText.innerHTML = '<div class="spinner"></div> 取得中...';
+  error.style.display = 'none';
+
+  const urlGroups = {};
+  for (const [key, station] of Object.entries(STATIONS)) {
+    if (!urlGroups[station.url]) urlGroups[station.url] = [];
+    urlGroups[station.url].push(key);
+  }
+
+  let hasError = false;
+  let errorMsg = '';
+
+  for (const [url, keys] of Object.entries(urlGroups)) {
+    try {
+      const html = await fetchWithProxy(url);
+      const fetchedAt = new Date().toISOString();
+
+      for (const key of keys) {
+        const station = STATIONS[key];
+        const data = extractWaterData(html, station.observatoryCode);
+
+        updateCard(key, data, fetchedAt);
+        addToHistory(key, data);
+        updateChart(key);
+      }
+    } catch (e) {
+      hasError = true;
+      errorMsg = e.message;
+      console.error(`URL ${url} 取得エラー:`, e.message);
+    }
+  }
+
+  if (hasError) {
+    $('errorText').textContent = errorMsg;
+    error.style.display = 'block';
+  }
+
+  btn.disabled = false;
+  btnText.textContent = 'データを更新';
+}
+
+// ========== 起動 ==========
+initUI();
+fetchAllData();
+setInterval(fetchAllData, 60000);
+</script>
+</body>
+</html>
